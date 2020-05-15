@@ -17,22 +17,20 @@ if(! dir.exists(here("figures"))){
   dir.create(here("figures"))
 }
 
-# load the raw main database
-fish_dat <- read_csv( here("data/1_alldata.csv") )
-str(fish_dat)
-
 
 ### justifying u-crit and pld values for as dispersal traits
 
+# load the raw main database
+ibd_dat <- read_csv( here("data/1_alldata.csv") )
+str(ibd_dat)
+
 # for this, we only use the Nanninga and Manica data
 ibd_dat <- 
-  fish_dat %>% 
+  ibd_dat %>% 
   filter(reference == "nanninga_manica_2018")
 
 # filter out the rows without ibd values
 ibd_dat <- filter(ibd_dat, !is.na(ibd))
-
-
 
 # filter out rows with pld greater than zero
 # this excludes the only direct developing species in the dataset
@@ -50,8 +48,15 @@ ibd_dat %>%
   facet_wrap(~var, scales = "free") +
   theme_classic()
 
-# transform and plot again
-mutate_at(ibd_dat, vars(ibd_vars), ~log(.)) %>%
+# ibd slope is heavily skewed so we log10 transform it
+
+# log10 transform variables that could predict the ibd slope to improve their distributions
+ibd_dat <- 
+  ibd_dat %>%
+  mutate_at(vars(ibd_vars), ~log(.))
+
+# check the distribution of the variables again
+ibd_dat %>%
   gather(ibd_vars, key = "var", value = "val") %>%
   ggplot(data = .,
          mapping = aes(x = val)) +
@@ -59,12 +64,7 @@ mutate_at(ibd_dat, vars(ibd_vars), ~log(.)) %>%
   facet_wrap(~var, scales = "free") +
   theme_classic()
 
-
-# log10 transform variables that could predict the ibd slope to improve their distributions
-ibd_dat <- mutate_at(ibd_dat, vars(ibd_vars), ~log(.))
-
-# count total number of data points
-nrow(ibd_dat)
+# this improves the distribution considerably
 
 # check the correlation among these variables 
 ibd_dat %>% 
@@ -79,14 +79,6 @@ ibd_dat %>%
 # mean_ucrit and max_ucrit are extremely correlated so we can ignore max_ucrit
 ibd_vars <- ibd_vars[ibd_vars != c("max_ucrit")]
 
-# check the distributions of these variables
-ggplot(data = ibd_dat %>% 
-         gather(ibd_vars, key = "group", value = "val"),
-       mapping = aes(x = val, fill = group)) +
-  geom_histogram() +
-  facet_wrap(~ group, scales = "free") +
-  theme_classic()
-
 # how many predictor variables are appropriate for this dataset
 nrow(ibd_dat)
 
@@ -95,12 +87,6 @@ nrow(ibd_dat)
 # does ibd differ between egg types
 ggplot(data = ibd_dat,
        mapping = aes(x = mean_ucrit, y = ibd, colour = egg_type)) +
-  geom_point() +
-  geom_smooth(method = "lm") +
-  theme_classic()
-
-ggplot(data = ibd_dat,
-       mapping = aes(x = mean_pld, y = ibd, colour = egg_type)) +
   geom_point() +
   geom_smooth(method = "lm") +
   theme_classic()
@@ -116,13 +102,14 @@ all_mods <- dredge(lm_glob, extra = "r.squaredLR", fixed = "mean_ucrit")
 # view these models
 all_mods %>% 
   as_tibble() %>% 
-  arrange(desc(r.squaredLR))  %>%
+  arrange(AICc)  %>%
   View()
 
 # based on this model selection, mean_pld, mean_ucrit and egg_type are all important variables
 
 # use a principle components analysis to make a single dispersal variable
-ibd_dat %>% names()
+ibd_dat %>% 
+  names()
 
 pca_glob <- princomp(~ mean_ucrit + mean_pld, data = ibd_dat,
                cor = TRUE)
@@ -131,12 +118,14 @@ pca_glob %>%
   summary()
 
 # extract pca component 1 scores from the global pca object
-pca_scores <- pca_glob$scores %>% 
+pca_scores <- 
+  pca_glob$scores %>% 
   as_tibble() %>%
   pull(Comp.1)
 
 # add this as a variable to ibd_dat data
-ibd_dat <- ibd_dat %>%
+ibd_dat <- 
+  ibd_dat %>%
   mutate(pca_comp.1 = pca_scores)
 
 
@@ -182,6 +171,7 @@ diag_out %>%
 cof_out
 
 # based on this, we accept that pca_comp.1 is the best predictor of the ibd slope
+# pca is based on ln-transformed mean_ucrit and ln-transformed mean_pld
 
 # how is the pca_com.1 axis related to mean_ucrit and mean_pld?
 # what does this axis mean?
@@ -193,6 +183,44 @@ ggplot(data = ibd_dat %>%
   geom_smooth(method = "lm") +
   facet_wrap(~larval_trait) +
   theme_classic()
+
+
+### create a dispersal trait variable from mean_ucrit and mean_pld
+
+# load the raw main database
+fish_dat <- read_csv( here("data/1_alldata.csv") )
+str(fish_dat)
+
+# remove the direct developing species i.e. mean_pld = 0
+fish_dat <- filter(fish_dat, mean_pld > 0)
+
+# check for NAs
+lapply(fish_dat, function(x) {  sum( if_else(is.na(x), 1, 0) )  })
+
+# first, take mean values of species for which there is more than one value for
+# second, filter rows without both mean_ucrit and mean_pld values
+disp_axis <- 
+  fish_dat %>%
+  group_by(family, genus, species, binomial) %>%
+  summarise(mean_ucrit = mean(mean_ucrit, na.rm = TRUE),
+            mean_pld = mean(mean_pld, na.rm = TRUE)) %>%
+  ungroup() %>% 
+  filter_at(vars(c("mean_ucrit", "mean_pld")), all_vars(!is.na(.)))
+
+lapply(disp_axis, function(x) {range(x)})
+
+disp_axis <- 
+  disp_axis %>%
+  mutate_at(vars(c("mean_ucrit", "mean_pld")), ~log(.))
+
+
+
+# dispersal pca axis for all species
+pca_disp <- princomp(~mean_ucrit + mean_pld, data = disp_axis, cor = TRUE)
+
+
+
+
 
 
 
@@ -242,7 +270,8 @@ bind_cols(mat = diet_mat$unique_id,
 
 # now the names are harmonised
 
-# need to convert diet_mat into a regular dataframe (due to the vegan package function)
+
+# convert diet_mat into a regular dataframe (due to the vegan package function)
 diet_mat <- as.data.frame(diet_mat)
 
 # set row names for the diet_mat
