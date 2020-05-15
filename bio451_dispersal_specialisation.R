@@ -21,62 +21,6 @@ if(! dir.exists(here("figures"))){
 fish_dat <- read_csv( here("data/1_alldata.csv") )
 str(fish_dat)
 
-# load the diet taxon matrix
-diet_mat <- read_csv( here("data/diet taxon.csv") )
-str(diet_mat)
-
-# load the diet data for each species
-diet_spp <- read_csv( here("data/2_diet_specialisation.csv") )
-str(diet_spp)
-
-# there are two incorrect column names
-diet_spp <- 
-  diet_spp %>%
-  rename(plants_other_plants_terrestrial_plants = `plants_other_plants_terrestrial plants`,
-         zooplankton_fish_early_stages_fish_eggs_larvae = `zooplankton_fish(early_stages)_fish_eggs_larvae`)
-
-# make sure the diet names are harmonised
-# if names are different give it a zero and then subset the zeros
-bind_cols(mat = diet_mat$unique_id,
-          spp = diet_spp %>% 
-            select(-species) %>% 
-            names()
-          ) %>%
-  mutate(harm = if_else(mat == spp, 1, 0)) %>%
-  filter(harm == 0) %>%
-  View()
-
-# they are not harmonised
-
-# harmonise the names
-diet_mat$unique_id <- 
-  diet_spp %>%
-  select(-species) %>% 
-  names()
-  
-# check that the names were harmonised properly
-bind_cols(mat = diet_mat$unique_id,
-          spp = diet_spp %>% 
-            select(-species) %>% 
-            names()
-          ) %>%
-  mutate(harm = if_else(mat == spp, 1, 0)) %>%
-  filter(harm == 0)
-
-# now the names are harmonised
-
-
-# load the habitat taxon matrix
-hab_mat <- read_csv( here("data/habitat taxon matrice.csv") )
-
-# load the habitat data for each species
-hab_spp <- read_csv( here("data/3_habitat_specialisation.csv") )
-
-# rename X1 column as species
-hab_spp <- 
-  hab_spp %>%
-  rename(species = "X1")
-
 
 ### justifying u-crit and pld values for as dispersal traits
 
@@ -251,12 +195,52 @@ ggplot(data = ibd_dat %>%
   theme_classic()
 
 
+
 ### calculate dietary diversity for each species
 
-# for this, we need the taxon matrix and species matrix for the diets
-diet_mat
+# load the diet taxon matrix
+diet_mat <- read_csv( here("data/diet taxon.csv") )
+str(diet_mat)
 
-diet_spp
+# load the diet data for each species
+diet_spp <- read_csv( here("data/2_diet_specialisation.csv") )
+str(diet_spp)
+
+# there are two incorrect column names
+diet_spp <- 
+  diet_spp %>%
+  rename(plants_other_plants_terrestrial_plants = `plants_other_plants_terrestrial plants`,
+         zooplankton_fish_early_stages_fish_eggs_larvae = `zooplankton_fish(early_stages)_fish_eggs_larvae`)
+
+# make sure the diet names are harmonised
+# if names are different give it a zero and then subset the zeros
+bind_cols(mat = diet_mat$unique_id,
+          spp = diet_spp %>% 
+            select(-species) %>% 
+            names()
+) %>%
+  mutate(harm = if_else(mat == spp, 1, 0)) %>%
+  filter(harm == 0) %>%
+  View()
+
+# they are not harmonised
+
+# harmonise the names
+diet_mat$unique_id <- 
+  diet_spp %>%
+  select(-species) %>% 
+  names()
+
+# check that the names were harmonised properly
+bind_cols(mat = diet_mat$unique_id,
+          spp = diet_spp %>% 
+            select(-species) %>% 
+            names()
+) %>%
+  mutate(harm = if_else(mat == spp, 1, 0)) %>%
+  filter(harm == 0)
+
+# now the names are harmonised
 
 # need to convert diet_mat into a regular dataframe (due to the vegan package function)
 diet_mat <- as.data.frame(diet_mat)
@@ -294,7 +278,8 @@ diet_div_dat <-
   diet_spp %>%
   filter_all( all_vars( (!is.na(.)) ) ) %>%
   select(-species) %>%
-  as.data.frame()
+  as.data.frame() %>%
+  decostand(., method = "pa")
 
 diet_div <- 
   taxondive(diet_div_dat, diet_dis)
@@ -307,41 +292,100 @@ spp_diet_div <-
   mutate(food_groups = diet_div$Species,
          diet_dplus = diet_div$Dplus)
 
+# check the correlations among these variables
 pairs(select(spp_diet_div, -species))
 
+# this dataframe can now be joined to the giant main dataframe
+spp_diet_div
 
 
+### calculate habitat diversity for each species
+
+# load the habitat taxon matrix
+hab_mat <- read_csv( here("data/habitat taxon matrice.csv") )
+str(hab_mat)
+
+# load the habitat data for each species
+hab_spp <- read_csv( here("data/3_habitat_specialisation.csv") )
+
+# rename X1 column as species
+hab_spp <- 
+  hab_spp %>%
+  rename(species = "X1")
+str(hab_spp)
+
+# check that the names are harmonised
+bind_cols(mat = hab_mat$id_number,
+          spp = hab_spp %>% 
+            select(-species) %>% 
+            names()
+) %>%
+  mutate(harm = if_else(mat == spp, 1, 0)) %>%
+  filter(harm == 0) %>%
+  View()
+
+# these names are harmonised
+
+# fill the NAs in the hab_mat so that it is unique
+hab_mat <- hab_mat %>%
+  group_by(habitat_i, habitat_ii) %>%
+  mutate(habitat_iii = if_else(is.na(habitat_iii), "a", habitat_iii))
+
+# as previously, we convert hab_mat into a regular dataframe (due to the vegan package function)
+hab_mat <- as.data.frame(hab_mat)
+
+# set row names for the hab_mat
+row.names(hab_mat) <- hab_mat$id_number
+
+# remove the unique_id column
+hab_mat <- select(hab_mat, -id_number)
+
+# set the food_i, food_ii and food_iii variables names as Family, Genus, Species
+names(hab_mat) <- c("Family", "Genus", "Species")
+
+# use the taxa2dist function to create a dissimilarity matrix
+hab_dis <- taxa2dist(hab_mat, varstep = TRUE, check = TRUE)
+hab_dis
 
 
+# use the species data and the dissimilarity matrix to calculate taxonomic distinctness
 
-# An example
+# check for NAs
+lapply(hab_spp, function(x) {sum(if_else(is.na(x), 1, 0)) })
 
-# Make the taxon matrix using Food_I, Food_II and Food_II
-df <- data.frame(Family = c("Detritus", "Detritus", "plants"),
-                 Genus = c("detritus", "detritus", "phytoplankton"),
-                 Species = c("debris", "carcasses", "blue_green_algae"))
-df
-
-# Give it rown names as a unique name (binomial equivalent)
-row.names(df) <- c("Detritus_detritus_debris", "Detritus_detritus_carcasses", "plants_phytoplankton_blue_green_algae")
-
-df
-
-# Make a dataframe for three different species (rows) and whether they eat different foods
-df_pres <- data.frame(Detritus_detritus_debris = c(1, 1, 0),
-                      Detritus_detritus_carcasses = c(1, 1, 1),
-                      plants_phytoplankton_blue_green_algae = c(0, 1, 1))
-df_pres
-
-# Calculate a dissimilarity matrix from the taxon matrix
-df_dis <- taxa2dist(df, varstep = TRUE)
-df_dis
-
-# Use the species data and the dissimilarity matrix to calculate taxonomic distinctness
-taxondive(df_pres, df_dis)
+lapply(hab_spp, function(x) { 
+  bind_cols(id = hab_spp$species, na_row = is.na(x) ) %>%
+    filter(na_row == TRUE) %>%
+    pull(id) 
+} )
 
 
+# first, remove the rows without any diet data (i.e. the nas)
+# second, remove the species column
+# third conver to presence absence
+hab_div_dat <- 
+  hab_spp %>%
+  filter_all( all_vars( (!is.na(.)) ) ) %>%
+  select(-species) %>%
+  as.data.frame() %>%
+  decostand(., method = "pa")
 
+hab_div <- 
+  taxondive(hab_div_dat, hab_dis)
+
+# attach these habitat specialisation indices to a dataframe with the species names
+spp_hab_div <- 
+  hab_spp %>%
+  filter_all( all_vars( (!is.na(.)) ) ) %>%
+  select(species) %>%
+  mutate(hab_groups = hab_div$Species,
+         hab_dplus = hab_div$Dplus)
+
+# check the correlations among these variables
+pairs(select(spp_hab_div, -species))
+
+# this dataframe can now be joined to the giant main dataframe
+spp_hab_div
 
 
 
