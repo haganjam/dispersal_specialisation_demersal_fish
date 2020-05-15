@@ -184,6 +184,7 @@ ggplot(data = ibd_dat %>%
   facet_wrap(~larval_trait) +
   theme_classic()
 
+# high pca values indicate high dispersal
 
 
 ### create a dispersal trait variable from mean_ucrit and mean_pld
@@ -463,7 +464,48 @@ fish_dat <-
   filter(fish_dat, mean_pld > 0 | is.na(mean_pld))
 
 # let's see what data we have
+fish_dat
 
+spp_diet_div
+
+spp_hab_div
+
+disp_axis
+
+# join the diet data and habitat data
+match(spp_diet_div$species, spp_hab_div$species)
+
+special <- 
+  full_join(spp_diet_div, spp_hab_div, by = "species") %>%
+  rename(binomial = "species")
+
+# join the dispersal axis to the full data
+disp <- 
+  full_join(fish_dat, 
+            select(disp_axis, -mean_ucrit, -mean_pld),
+            by = c("reference", "family", "genus", "species", "binomial"))
+
+
+# join the full data and the specialisation data
+ds_dat <- 
+  full_join(disp, special, by = "binomial")
+
+ds_dat %>% names()
+
+# you will work with this ds_dat dataset
+# note that the important variables are:
+# dispersal traits: dispersal_trait_axis, mean_ucrit, mean_pld
+# dispersal_trait_axis (high = high dispersal, low = low dispersal)
+# diet_dplus, hab_dplus (high = generalist, low = specialist)
+
+ggplot(data = ds_dat %>%
+         filter(latitude_species > 0),
+       mapping = aes(x = dispersal_trait_axis, y = diet_dplus, colour = egg_type)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_classic()
+
+# now you can explore patterns in the data as recommended in the last meeting
 
 
 
