@@ -185,42 +185,75 @@ ggplot(data = ibd_dat %>%
   theme_classic()
 
 
+
 ### create a dispersal trait variable from mean_ucrit and mean_pld
 
 # load the raw main database
-fish_dat <- read_csv( here("data/1_alldata.csv") )
-str(fish_dat)
+disp_axis <- read_csv( here("data/1_alldata.csv") )
+str(disp_axis)
 
 # remove the direct developing species i.e. mean_pld = 0
-fish_dat <- filter(fish_dat, mean_pld > 0)
+disp_axis <- 
+  disp_axis %>% 
+  filter(mean_pld > 0 | is.na(mean_pld))
+
+# remove points without mean_ucrit subpopulation values because these are duplicates
+disp_axis <-
+  disp_axis %>%
+  filter(is.na(mean_ucrit_subpopulation))
 
 # check for NAs
-lapply(fish_dat, function(x) {  sum( if_else(is.na(x), 1, 0) )  })
+lapply(disp_axis, function(x) {  sum( if_else(is.na(x), 1, 0) )  })
 
-# first, take mean values of species for which there is more than one value for
-# second, filter rows without both mean_ucrit and mean_pld values
+# subset out only columns that are useful for this analysis
+names(disp_axis)
+
 disp_axis <- 
-  fish_dat %>%
-  group_by(family, genus, species, binomial) %>%
-  summarise(mean_ucrit = mean(mean_ucrit, na.rm = TRUE),
-            mean_pld = mean(mean_pld, na.rm = TRUE)) %>%
-  ungroup() %>% 
+  disp_axis %>%
+  select("reference", "family", "genus", "species", "binomial", "mean_ucrit", "mean_pld")
+
+# filter rows without both mean_ucrit and mean_pld values
+disp_axis <- 
+  disp_axis %>%
   filter_at(vars(c("mean_ucrit", "mean_pld")), all_vars(!is.na(.)))
 
-lapply(disp_axis, function(x) {range(x)})
+lapply(disp_axis, function(x) {range(x, na.rm = TRUE)})
 
+# ln-transform the mean_ucrit and mean_pld data
 disp_axis <- 
   disp_axis %>%
   mutate_at(vars(c("mean_ucrit", "mean_pld")), ~log(.))
 
-
-
 # dispersal pca axis for all species
-pca_disp <- princomp(~mean_ucrit + mean_pld, data = disp_axis, cor = TRUE)
+pca_disp <- princomp(~ mean_ucrit + mean_pld, data = disp_axis, cor = TRUE)
 
+# how much variation does this axis explain?
+summary(pca_disp)
 
+comp.1_scores <- 
+  pca_disp$scores %>% 
+  as_tibble() %>%
+  pull(Comp.1)
 
+# add this pca axis score to the disp_axis data
+disp_axis <- 
+  disp_axis %>%
+  mutate(dispersal_trait_axis = comp.1_scores)
 
+# how is this new trait axis related to mean_ucrit and mean_pld
+disp_axis %>%
+  gather(mean_ucrit, mean_pld, key = "key", value = "value") %>%
+  ggplot(mapping = aes(x = dispersal_trait_axis, y = value)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  facet_wrap(~key) +
+  theme_classic()
+
+# dispersal trait axis is positively related to both mean_pld and mean_ucrit values
+# we know that this axis predicts ibd well in a subset of these species
+# we assume that this axis predicts dispersal for other species as well
+
+disp_axis
 
 
 
@@ -231,7 +264,7 @@ diet_mat <- read_csv( here("data/diet taxon.csv") )
 str(diet_mat)
 
 # load the diet data for each species
-diet_spp <- read_csv( here("data/2_diet_specialisation.csv") )
+diet_spp <- read_csv( here("data/2_diet_specialisation2.csv") )
 str(diet_spp)
 
 # there are two incorrect column names
@@ -248,8 +281,7 @@ bind_cols(mat = diet_mat$unique_id,
             names()
 ) %>%
   mutate(harm = if_else(mat == spp, 1, 0)) %>%
-  filter(harm == 0) %>%
-  View()
+  filter(harm == 0)
 
 # they are not harmonised
 
@@ -297,8 +329,6 @@ lapply(diet_spp, function(x) {
     filter(na_row == TRUE) %>%
     pull(id) 
   } )
-
-# why is the "zoobenthos_sponges_tunicates_sponges" column have missing data?
 
 # first, remove the rows without any diet data (i.e. the nas)
 # second, remove the species column
@@ -350,8 +380,7 @@ bind_cols(mat = hab_mat$id_number,
             names()
 ) %>%
   mutate(harm = if_else(mat == spp, 1, 0)) %>%
-  filter(harm == 0) %>%
-  View()
+  filter(harm == 0)
 
 # these names are harmonised
 
@@ -389,9 +418,9 @@ lapply(hab_spp, function(x) {
 } )
 
 
-# first, remove the rows without any diet data (i.e. the nas)
+# first, remove the rows without any habitat data (i.e. the nas)
 # second, remove the species column
-# third conver to presence absence
+# third convert to presence absence
 hab_div_dat <- 
   hab_spp %>%
   filter_all( all_vars( (!is.na(.)) ) ) %>%
@@ -415,6 +444,29 @@ pairs(select(spp_hab_div, -species))
 
 # this dataframe can now be joined to the giant main dataframe
 spp_hab_div
+
+
+
+### join new dispersal and specialisation variables into the main dataset
+
+# load the raw main database
+fish_dat <- read_csv( here("data/1_alldata.csv") )
+str(fish_dat)
+
+# remove duplicate rows
+fish_dat <-
+  fish_dat %>%
+  filter(is.na(mean_ucrit_subpopulation)) 
+
+# remove the direct developing species i.e. mean_pld = 0
+fish_dat <- 
+  filter(fish_dat, mean_pld > 0 | is.na(mean_pld))
+
+# let's see what data we have
+
+
+
+
 
 
 
