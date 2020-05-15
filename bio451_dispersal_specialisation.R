@@ -10,37 +10,114 @@ library(corrplot)
 library(gsheet)
 library(viridis)
 library(MuMIn)
+library(vegan)
 
 # make a folder to export figures or tables
 if(! dir.exists(here("figures"))){
   dir.create(here("figures"))
 }
 
-# load the data from google sheets
-# url1 <- "https://docs.google.com/spreadsheets/d/1NyupV8XW7bWqi_Pxw476bbNF-sovFM8JVXmH2PgdqRw/edit#gid=489914387"
-# fish_dat_raw <- read_csv(construct_download_url(url1))
+# load the raw main database
+fish_dat <- read_csv( here("data/1_alldata.csv") )
+str(fish_dat)
 
-# for now, just read in the data to examine the predictors of ibd slope
+# load the diet taxon matrix
+diet_mat <- read_csv( here("data/diet taxon.csv") )
+str(diet_mat)
 
-ibd_dat <- read_csv(here("data/prel_dat.csv"))
+# load the diet data for each species
+diet_spp <- read_csv( here("data/2_diet_specialisation.csv") )
+str(diet_spp)
 
-# subset out the Nanninga and Manica (2018) data
-#ibd_dat <- fish_dat_raw %>%
-  #filter(Reference == "nanninga_manica_2018")
+# there are two incorrect column names
+diet_spp <- 
+  diet_spp %>%
+  rename(plants_other_plants_terrestrial_plants = `plants_other_plants_terrestrial plants`,
+         zooplankton_fish_early_stages_fish_eggs_larvae = `zooplankton_fish(early_stages)_fish_eggs_larvae`)
+
+# make sure the diet names are harmonised
+# if names are different give it a zero and then subset the zeros
+bind_cols(mat = diet_mat$unique_id,
+          spp = diet_spp %>% 
+            select(-species) %>% 
+            names()
+          ) %>%
+  mutate(harm = if_else(mat == spp, 1, 0)) %>%
+  filter(harm == 0) %>%
+  View()
+
+# they are not harmonised
+
+# harmonise the names
+diet_mat$unique_id <- 
+  diet_spp %>%
+  select(-species) %>% 
+  names()
+  
+# check that the names were harmonised properly
+bind_cols(mat = diet_mat$unique_id,
+          spp = diet_spp %>% 
+            select(-species) %>% 
+            names()
+          ) %>%
+  mutate(harm = if_else(mat == spp, 1, 0)) %>%
+  filter(harm == 0)
+
+# now the names are harmonised
+
+
+# load the habitat taxon matrix
+hab_mat <- read_csv( here("data/habitat taxon matrice.csv") )
+
+# load the habitat data for each species
+hab_spp <- read_csv( here("data/3_habitat_specialisation.csv") )
+
+# rename X1 column as species
+hab_spp <- 
+  hab_spp %>%
+  rename(species = "X1")
+
+
+### justifying u-crit and pld values for as dispersal traits
+
+# for this, we only use the Nanninga and Manica data
+ibd_dat <- 
+  fish_dat %>% 
+  filter(reference == "nanninga_manica_2018")
 
 # filter out the rows without ibd values
 ibd_dat <- filter(ibd_dat, !is.na(ibd))
 
+
+
 # filter out rows with pld greater than zero
-# this excludes the only direct developing species
+# this excludes the only direct developing species in the dataset
 ibd_dat <- filter(ibd_dat, mean_pld > 0)
 
 # select certain variables that might predict the ibd slope
 ibd_vars <- c("mean_ucrit", "ibd", "mean_pld", "max_ucrit", "mean_larval_size")
 
-# log10 transform variables that could predict the ibd slope
-ibd_dat <- mutate_at(ibd_dat, vars(ibd_vars),
-                     ~log(.))
+# plot histograms of these variables
+ibd_dat %>%
+  gather(ibd_vars, key = "var", value = "val") %>%
+  ggplot(data = .,
+       mapping = aes(x = val)) +
+  geom_histogram() +
+  facet_wrap(~var, scales = "free") +
+  theme_classic()
+
+# transform and plot again
+mutate_at(ibd_dat, vars(ibd_vars), ~log(.)) %>%
+  gather(ibd_vars, key = "var", value = "val") %>%
+  ggplot(data = .,
+         mapping = aes(x = val)) +
+  geom_histogram() +
+  facet_wrap(~var, scales = "free") +
+  theme_classic()
+
+
+# log10 transform variables that could predict the ibd slope to improve their distributions
+ibd_dat <- mutate_at(ibd_dat, vars(ibd_vars), ~log(.))
 
 # count total number of data points
 nrow(ibd_dat)
@@ -174,64 +251,98 @@ ggplot(data = ibd_dat %>%
   theme_classic()
 
 
+### calculate dietary diversity for each species
+
+# for this, we need the taxon matrix and species matrix for the diets
+diet_mat
+
+diet_spp
+
+# need to convert diet_mat into a regular dataframe (due to the vegan package function)
+diet_mat <- as.data.frame(diet_mat)
+
+# set row names for the diet_mat
+row.names(diet_mat) <- diet_mat$unique_id
+
+# remove the unique_id column
+diet_mat <- select(diet_mat, -unique_id)
+
+# set the food_i, food_ii and food_iii variables names as Family, Genus, Species
+names(diet_mat) <- c("Family", "Genus", "Species")
+
+# use the taxa2dist function to create a dissimilarity matrix
+diet_dis <- taxa2dist(diet_mat, varstep = TRUE, check = TRUE)
 
 
-### getting rid of commas etc.
+# use the species data and the dissimilarity matrix to calculate taxonomic distinctness
 
-# filter the Nanninga and Manica data for now
-fish_dat <- fish_dat_raw %>%
-  filter(Reference == "nanninga_manica_2018")
+# check for NAs
+lapply(diet_spp, function(x) {sum(if_else(is.na(x), 1, 0)) })
 
-# remove some useless columns
-names(fish_dat)
+lapply(diet_spp, function(x) { 
+  bind_cols(id = diet_spp$species, na_row = is.na(x) ) %>%
+    filter(na_row == TRUE) %>%
+    pull(id) 
+  } )
 
-fish_dat <- select(fish_dat, -"Comment 1", -"Comment 2", -"binomial_2")
+# why is the "zoobenthos_sponges_tunicates_sponges" column have missing data?
 
-# get variable names that are numbers
-var_nums <- lapply(fish_dat, 
-       function(r) {if_else(grepl(pattern = paste(c(0:9), collapse = "|"), x = r) == TRUE, 1 , 0) %>% sum()} ) %>%
-  Filter(function(x) sum(x) > 0, .) %>%
-  names()
-var_nums
+# first, remove the rows without any diet data (i.e. the nas)
+# second, remove the species column
+# third conver to presence absence
+diet_div_dat <- 
+  diet_spp %>%
+  filter_all( all_vars( (!is.na(.)) ) ) %>%
+  select(-species) %>%
+  as.data.frame()
 
-# remove reference from this because we don't want this as a numeric variable
-var_nums <- var_nums[var_nums != "Reference"]
+diet_div <- 
+  taxondive(diet_div_dat, diet_dis)
 
-# get variables where the commas need to be replaced
-var_coms <- lapply(fish_dat, 
-       function(r) {if_else(grepl(pattern = ",", x = r) == TRUE, 1 , 0) %>% sum()} ) %>%
-  Filter(function(x) sum(x) > 0, .) %>%
-  names()
+# attach these diet specialisation indices to a dataframe with the species names
+spp_diet_div <- 
+  diet_spp %>%
+  filter_all( all_vars( (!is.na(.)) ) ) %>%
+  select(species) %>%
+  mutate(food_groups = diet_div$Species,
+         diet_dplus = diet_div$Dplus)
 
-# get unique variable numbers without commas
-var_nums <- var_nums[-match(var_coms, var_nums)]
+pairs(select(spp_diet_div, -species))
 
-# check these variables
-select(fish_dat, var_coms) %>%
-  lapply(function(x) { if_else(unique(x) == "NA", 1, 0) })
 
-var_coms
 
-fish_dat$min_ucrit %>% as.numeric()
 
-gsub(",", ".", fish_dat$latitude) %>% as.numeric()
 
-bind_cols(x1 = fish_dat$latitude, x2 = gsub(",", ".", fish_dat$latitude) %>% as.numeric()) %>%
-  View()
 
-# convert the decimals into points and then numbers
-fish_dat <- fish_dat %>%
-  mutate_at(vars(var_coms), ~gsub(",", ".", .) %>% as.numeric())
+# An example
 
-# convert the numbers without decimals to numeric
-fish_dat <- fish_dat %>%
-  mutate_at(vars(var_nums), ~as.numeric(.))
+# Make the taxon matrix using Food_I, Food_II and Food_II
+df <- data.frame(Family = c("Detritus", "Detritus", "plants"),
+                 Genus = c("detritus", "detritus", "phytoplankton"),
+                 Species = c("debris", "carcasses", "blue_green_algae"))
+df
 
-c(1, 2, NA) %>% as.numeric()
+# Give it rown names as a unique name (binomial equivalent)
+row.names(df) <- c("Detritus_detritus_debris", "Detritus_detritus_carcasses", "plants_phytoplankton_blue_green_algae")
 
-# replace all the commas with points
+df
 
-match()
+# Make a dataframe for three different species (rows) and whether they eat different foods
+df_pres <- data.frame(Detritus_detritus_debris = c(1, 1, 0),
+                      Detritus_detritus_carcasses = c(1, 1, 1),
+                      plants_phytoplankton_blue_green_algae = c(0, 1, 1))
+df_pres
+
+# Calculate a dissimilarity matrix from the taxon matrix
+df_dis <- taxa2dist(df, varstep = TRUE)
+df_dis
+
+# Use the species data and the dissimilarity matrix to calculate taxonomic distinctness
+taxondive(df_pres, df_dis)
+
+
+
+
 
 
 
