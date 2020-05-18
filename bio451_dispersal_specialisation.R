@@ -319,7 +319,6 @@ names(diet_mat) <- c("Family", "Genus", "Species")
 # use the taxa2dist function to create a dissimilarity matrix
 diet_dis <- taxa2dist(diet_mat, varstep = TRUE, check = TRUE)
 
-
 # use the species data and the dissimilarity matrix to calculate taxonomic distinctness
 
 # check for NAs
@@ -490,24 +489,63 @@ disp <-
 ds_dat <- 
   full_join(disp, special, by = "binomial")
 
-ds_dat %>% names()
+
+### make a single specialisation axis for the environmental conditions
+
+names(ds_dat)
+
+# depth_range
+# tpref_range
+# salinity_range
+
+spec_vars <- c("depth_range", "tpref_range", "salinity_range")
+
+spec_dat <- 
+  ds_dat %>%
+  select(binomial, spec_vars)
+  
+# remove rows with NA's
+spec_dat <- 
+  spec_dat %>%
+  filter_at(vars(spec_vars), all_vars(!is.na(.)))
+
+pca_spec <- princomp(reformulate(spec_vars), data = spec_dat, cor = TRUE)
+summary(pca_spec)
+
+biplot(pca_spec)
+
+# add the Comp.1 scores as a variable
+spec_dat$env_special <- 
+  pca_spec$scores %>%
+  as_tibble() %>%
+  pull(Comp.1)
+  
+# join this variable onto the ds_dat data
+ds_dat <- 
+  full_join(ds_dat, select(spec_dat, binomial, env_special), by = c("binomial"))
+
 
 # you will work with this ds_dat dataset
 # note that the important variables are:
 # dispersal traits: dispersal_trait_axis, mean_ucrit, mean_pld
 # dispersal_trait_axis (high = high dispersal, low = low dispersal)
-# diet_dplus, hab_dplus (high = generalist, low = specialist)
+# diet_dplus and hab_dplus (high = generalist, low = specialist)
+# env_special (high = generalist, low = specialist)
 
-ggplot(data = ds_dat %>%
-         filter(latitude_species > 0),
-       mapping = aes(x = dispersal_trait_axis, y = diet_dplus, colour = egg_type)) +
+ggplot(data = ds_dat,
+       mapping = aes(x = diet_dplus, y = env_special)) +
   geom_point() +
   geom_smooth(method = "lm") +
   theme_classic()
 
+ggplot(data = ds_dat,
+       mapping = aes(x = hab_dplus, y = env_special)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_classic()
+
+
 # now you can explore patterns in the data as recommended in the last meeting
-
-
 
 
 
