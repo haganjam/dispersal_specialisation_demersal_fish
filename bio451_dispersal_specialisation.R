@@ -236,11 +236,12 @@ all_raw$family[which(all_raw$family == "monacanthidae")] <- c("nemipteridae")
 all_raw$genus[which(all_raw$genus == "abudefdud")] <- c("abudefduf")
 
 # the problem here is that we now have extra data points that we need to correct
+
+### amphiprion_melanopus
 all_raw %>%
   filter(binomial == "amphiprion_melanopus") %>%
   View()
 
-### fix these problems
 # calculate the mean_ucrit for amphiprion_melanopus
 a_m <- 
   all_raw %>%
@@ -254,6 +255,11 @@ all_raw$mean_ucrit[which(all_raw$binomial == "amphiprion_melanopus")] <- a_m
 # amphiprion_melanopus also has two different latitude values: convert to -11
 all_raw$latitude_species[which(all_raw$binomial == "amphiprion_melanopus")] <- c(-11)
 
+### amphiprion_percula
+all_raw %>%
+  filter(binomial == "amphiprion_percula") %>%
+  View()
+
 # calculate the mean_ucrit for amphiprion_percula
 a_p <- 
   all_raw %>%
@@ -264,11 +270,19 @@ a_p <-
 # replace the ucrit value with this mean
 all_raw$mean_ucrit[which(all_raw$binomial == "amphiprion_percula")] <- a_p
 
-# for atherina_presbyter, mean_larval_size is missing for one row of the data
+### atherina_presbyter, there are several inconsistencies:
 all_raw %>%
-  filter(binomial == "atherina_presbyter")
+  filter(binomial == "atherina_presbyter") %>%
+  View()
 
-all_raw$mean_ucrit[which(all_raw$binomial == "amphiprion_percula")] <- a_p
+# mean_larval_size is missing for one row of the data and must be filled in
+all_raw$mean_larval_size[which(all_raw$binomial == "atherina_presbyter")] <- 16
+
+# food_ i should be one
+all_raw$food_i[which(all_raw$binomial == "atherina_presbyter")] <- 1
+
+# iucn_hab_sub is unclear but I will make it 0.35
+all_raw$habitat_iucn_sub[which(all_raw$binomial == "atherina_presbyter")] <- 0.35
 
 
 # take the distinct rows out (i.e. remove any duplicates)
@@ -278,37 +292,18 @@ all_raw <-
          -comment_1, -comment_2, -binomial_2) %>%
   distinct()
 
-duplicates <- 
-  all_raw %>%
-  group_by(binomial) %>%
-  summarise(n = n()) %>%
-  filter(n > 1) %>%
-  pull(binomial)
-
-all_raw %>%
-  filter(binomial %in% duplicates) %>%
-  View()
-
 nrow(all_raw)
 all_raw$binomial %>%
   unique() %>%
   length()
 
+# now the data are correct I think... but we will probably find more mistakes
+
+
 ### create a dispersal trait variable from mean_ucrit and mean_pld
 
-# load the raw main database
-disp_axis <- read_csv( here("data/1_alldata.csv") )
-str(disp_axis)
-
-# remove the direct developing species i.e. mean_pld = 0
-disp_axis <- 
-  disp_axis %>% 
-  filter(mean_pld > 0 | is.na(mean_pld))
-
-# remove points without mean_ucrit subpopulation values because these are duplicates
-disp_axis <-
-  disp_axis %>%
-  filter(is.na(mean_ucrit_subpopulation))
+# create a copy of the all raw to be modified
+disp_axis <- all_raw
 
 # check for NAs
 lapply(disp_axis, function(x) {  sum( if_else(is.na(x), 1, 0) )  })
@@ -318,7 +313,7 @@ names(disp_axis)
 
 disp_axis <- 
   disp_axis %>%
-  select("reference", "family", "genus", "species", "binomial", "mean_ucrit", "mean_pld")
+  select("family", "genus", "species", "binomial", "mean_ucrit", "mean_pld")
 
 # filter rows without both mean_ucrit and mean_pld values
 disp_axis <- 
@@ -375,10 +370,25 @@ str(diet_mat)
 diet_spp <- read_csv( here("data/2_diet_specialisation2.csv") )
 str(diet_spp)
 
+# check species names of diet_spp
+diet_spp$species %>% 
+  unique() %>%
+  sort()
+
+# correct the incorrectly spelt names
+diet_spp$species[which(diet_spp$species == "amphirion_clarki")] <- c("amphiprion_clarki")
+diet_spp$species[which(diet_spp$species == "amphirion_melanopus")] <- c("amphiprion_melanopus")
+diet_spp$species[which(diet_spp$species == "amphirion_percula")] <- c("amphiprion_percula")
+
+# remove the acanthochromis_polyacanthus (direct developer)
+diet_spp <- 
+  diet_spp %>%
+  filter(species != c("acanthochromis_polyacanthus"))
+
 # there are two incorrect column names
 diet_spp <- 
   diet_spp %>%
-  rename(plants_other_plants_terrestrial_plants = `plants_other_plants_terrestrial plants`,
+  dplyr::rename(plants_other_plants_terrestrial_plants = `plants_other_plants_terrestrial plants`,
          zooplankton_fish_early_stages_fish_eggs_larvae = `zooplankton_fish(early_stages)_fish_eggs_larvae`)
 
 # make sure the diet names are harmonised
@@ -477,8 +487,23 @@ hab_spp <- read_csv( here("data/3_habitat_specialisation.csv") )
 # rename X1 column as species
 hab_spp <- 
   hab_spp %>%
-  rename(species = "X1")
+  dplyr::rename(species = "X1")
 str(hab_spp)
+
+# check the species names
+hab_spp$species %>%
+  unique() %>%
+  sort()
+
+# correct the incorrectly spelt names
+hab_spp$species[which(hab_spp$species == "amphirion_clarki")] <- c("amphiprion_clarki")
+hab_spp$species[which(hab_spp$species == "amphirion_melanopus")] <- c("amphiprion_melanopus")
+hab_spp$species[which(hab_spp$species == "amphirion_percula")] <- c("amphiprion_percula")
+
+# remove the acanthochromis_polyacanthus species as it is the direct developer
+hab_spp <- 
+  hab_spp %>%
+  filter(species != c("acanthochromis_polyacanthus"))
 
 # check that the names are harmonised
 bind_cols(mat = hab_mat$id_number,
@@ -556,18 +581,9 @@ spp_hab_div
 
 ### join new dispersal and specialisation variables into the main dataset
 
-# load the raw main database
-fish_dat <- read_csv( here("data/1_alldata.csv") )
+# copy the main database without duplicates
+fish_dat <- all_raw
 str(fish_dat)
-
-# remove duplicate rows
-fish_dat <-
-  fish_dat %>%
-  filter(is.na(mean_ucrit_subpopulation)) 
-
-# remove the direct developing species i.e. mean_pld = 0
-fish_dat <- 
-  filter(fish_dat, mean_pld > 0 | is.na(mean_pld))
 
 # let's see what data we have
 fish_dat
@@ -589,7 +605,7 @@ special <-
 disp <- 
   full_join(fish_dat, 
             select(disp_axis, -mean_ucrit, -mean_pld),
-            by = c("reference", "family", "genus", "species", "binomial"))
+            by = c("family", "genus", "species", "binomial"))
 
 
 # join the full data and the specialisation data
@@ -639,14 +655,18 @@ ds_dat <-
 # diet_dplus and hab_dplus (high = generalist, low = specialist)
 # env_special (high = generalist, low = specialist)
 
-ggplot(data = ds_dat,
-       mapping = aes(x = diet_dplus, y = env_special)) +
+ggplot(data = ds_dat %>% 
+         group_by(family) %>%
+         mutate(latitude_species = abs(latitude_species)) %>%
+         summarise_at(vars(c("latitude_species", "hab_dplus")), ~mean(., na.rm = TRUE)),
+       mapping = aes(x = latitude_species, y = hab_dplus) ) +
   geom_point() +
   geom_smooth(method = "lm") +
   theme_classic()
 
-ggplot(data = ds_dat,
-       mapping = aes(x = hab_dplus, y = env_special)) +
+ggplot(data = ds_dat %>%
+         filter(family == "pomacentridae"),
+       mapping = aes(x = env_special, y = dispersal_trait_axis)) +
   geom_point() +
   geom_smooth(method = "lm") +
   theme_classic()
