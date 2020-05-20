@@ -599,7 +599,7 @@ match(spp_diet_div$species, spp_hab_div$species)
 
 special <- 
   full_join(spp_diet_div, spp_hab_div, by = "species") %>%
-  rename(binomial = "species")
+  dplyr::rename(binomial = "species")
 
 # join the dispersal axis to the full data
 disp <- 
