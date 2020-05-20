@@ -193,6 +193,8 @@ ggplot(data = ibd_dat %>%
 
 
 
+### you must run all this code
+
 ### load the raw data and correct the problems with it
 
 all_raw <- read_csv( here("data/1_alldata.csv") )
