@@ -3,14 +3,19 @@
 
 # load relevant libraries
 
-library(tidyverse)
-library(here)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(ggplot2)
 library(broom)
-library(corrplot)
-library(gsheet)
+library(RColorBrewer)
 library(viridis)
+library(here)
+library(corrplot)
 library(MuMIn)
 library(vegan)
+
 
 # make a folder to export figures or tables
 if(! dir.exists(here("figures"))){
@@ -186,6 +191,108 @@ ggplot(data = ibd_dat %>%
 
 # high pca values indicate high dispersal
 
+
+
+### load the raw data and correct the problems with it
+
+all_raw <- read_csv( here("data/1_alldata.csv") )
+str(all_raw)
+
+# remove the direct developing species
+all_raw <- 
+  all_raw %>% filter(mean_pld > 0 | is.na(mean_pld))
+
+# fix the incorrect names (from Niklas)
+
+# amphirion clarkii has a latitude range of 60 but min_lat = max_lat=30 
+# this must be a mistake, so we need to change min_lat on that row to -30
+all_raw$min_lat[which(all_raw$binomial == "amphirion_clarki")] <- (-30)
+
+# change demersal egg type (chromis_chromis) to benthic 
+all_raw$egg_type[which(all_raw$egg_type == "dem")] <- c("ben")
+
+# also change "Sparidae" to "sparidae" in the family column
+all_raw$family[which(all_raw$family == "Sparidae")] <- c("sparidae")
+
+# amphirion should be amphiprionin binomial and genus names 
+all_raw$genus[which(all_raw$genus == "amphirion")] <- c("amphiprion")
+
+# binomial for certain amphiprion species are incorrect: (amphirion_clarki, amphirion_melanopus, amphirion_percula)
+all_raw$binomial[which(all_raw$binomial == "amphirion_clarki")] <- c("amphiprion_clarki")
+all_raw$binomial[which(all_raw$binomial == "amphirion_melanopus")] <- c("amphiprion_melanopus")
+all_raw$binomial[which(all_raw$binomial == "amphirion_percula")] <- c("amphiprion_percula")
+
+# Amphiprioninae AND Pomacentrinae should be Pomacentridae in family names
+all_raw$family[which(all_raw$family == "amphiprioninae")] <- c("pomacentridae")
+all_raw$family[which(all_raw$family == "pomacentrinae")] <- c("pomacentridae")
+
+# additional mistakes with family
+all_raw$family[which(all_raw$family == "pomacanthidae")] <- c("pomacentridae")
+all_raw$family[which(all_raw$family == "lutjanidae")] <- c("caesionidae")
+all_raw$family[which(all_raw$family == "pomacanthidae")] <- c("pomacentridae")
+all_raw$family[which(all_raw$family == "monacanthidae")] <- c("nemipteridae")
+
+# additional mistake with genus: abudefdud should be abudefduf
+all_raw$genus[which(all_raw$genus == "abudefdud")] <- c("abudefduf")
+
+# the problem here is that we now have extra data points that we need to correct
+all_raw %>%
+  filter(binomial == "amphiprion_melanopus") %>%
+  View()
+
+### fix these problems
+# calculate the mean_ucrit for amphiprion_melanopus
+a_m <- 
+  all_raw %>%
+  filter(binomial == "amphiprion_melanopus") %>%
+  pull(mean_ucrit) %>%
+  mean()
+
+# replace the ucrit value with this mean
+all_raw$mean_ucrit[which(all_raw$binomial == "amphiprion_melanopus")] <- a_m
+
+# amphiprion_melanopus also has two different latitude values: convert to -11
+all_raw$latitude_species[which(all_raw$binomial == "amphiprion_melanopus")] <- c(-11)
+
+# calculate the mean_ucrit for amphiprion_percula
+a_p <- 
+  all_raw %>%
+  filter(binomial == "amphiprion_percula") %>%
+  pull(mean_ucrit) %>%
+  mean()
+
+# replace the ucrit value with this mean
+all_raw$mean_ucrit[which(all_raw$binomial == "amphiprion_percula")] <- a_p
+
+# for atherina_presbyter, mean_larval_size is missing for one row of the data
+all_raw %>%
+  filter(binomial == "atherina_presbyter")
+
+all_raw$mean_ucrit[which(all_raw$binomial == "amphiprion_percula")] <- a_p
+
+
+# take the distinct rows out (i.e. remove any duplicates)
+all_raw <- 
+  all_raw %>%
+  select(-reference, -mean_ucrit_subpopulation, -min_ucrit, -max_ucrit, -latitude_subpopulation,
+         -comment_1, -comment_2, -binomial_2) %>%
+  distinct()
+
+duplicates <- 
+  all_raw %>%
+  group_by(binomial) %>%
+  summarise(n = n()) %>%
+  filter(n > 1) %>%
+  pull(binomial)
+
+all_raw %>%
+  filter(binomial %in% duplicates) %>%
+  View()
+
+nrow(all_raw)
+all_raw$binomial %>%
+  unique() %>%
+  length()
 
 ### create a dispersal trait variable from mean_ucrit and mean_pld
 
