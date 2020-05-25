@@ -678,7 +678,7 @@ ggplot(data = ds_dat %>%
 # now you can explore patterns in the data as recommended in the last meeting
 
 
-# explore intraspecific variation in mean_ucrit with latitude
+### explore intraspecific variation in mean_ucrit with latitude
 
 # create a copy of all raw called fish_intra
 fish_intra <- all_raw
