@@ -15,6 +15,7 @@ library(here)
 library(corrplot)
 library(MuMIn)
 library(vegan)
+library(lme4)
 
 
 # make a folder to export figures or tables
@@ -286,16 +287,15 @@ all_raw$food_i[which(all_raw$binomial == "atherina_presbyter")] <- 1
 # iucn_hab_sub is unclear but I will make it 0.35
 all_raw$habitat_iucn_sub[which(all_raw$binomial == "atherina_presbyter")] <- 0.35
 
-
 # take the distinct rows out (i.e. remove any duplicates)
-all_raw <- 
+all_raw_inter <- 
   all_raw %>%
   select(-reference, -mean_ucrit_subpopulation, -min_ucrit, -max_ucrit, -latitude_subpopulation,
          -comment_1, -comment_2, -binomial_2) %>%
   distinct()
 
-nrow(all_raw)
-all_raw$binomial %>%
+nrow(all_raw_inter)
+all_raw_inter$binomial %>%
   unique() %>%
   length()
 
@@ -305,7 +305,7 @@ all_raw$binomial %>%
 ### create a dispersal trait variable from mean_ucrit and mean_pld
 
 # create a copy of the all raw to be modified
-disp_axis <- all_raw
+disp_axis <- all_raw_inter
 
 # check for NAs
 lapply(disp_axis, function(x) {  sum( if_else(is.na(x), 1, 0) )  })
@@ -519,7 +519,8 @@ bind_cols(mat = hab_mat$id_number,
 # these names are harmonised
 
 # fill the NAs in the hab_mat so that it is unique
-hab_mat <- hab_mat %>%
+hab_mat <- 
+  hab_mat %>%
   group_by(habitat_i, habitat_ii) %>%
   mutate(habitat_iii = if_else(is.na(habitat_iii), "a", habitat_iii))
 
@@ -584,7 +585,7 @@ spp_hab_div
 ### join new dispersal and specialisation variables into the main dataset
 
 # copy the main database without duplicates
-fish_dat <- all_raw
+fish_dat <- all_raw_inter
 str(fish_dat)
 
 # let's see what data we have
@@ -675,6 +676,288 @@ ggplot(data = ds_dat %>%
 
 
 # now you can explore patterns in the data as recommended in the last meeting
+
+
+# explore intraspecific variation in mean_ucrit with latitude
+
+# create a copy of all raw called fish_intra
+fish_intra <- all_raw
+
+# remove some columns
+fish_intra <- 
+  fish_intra %>%
+  select(-comment_1, -comment_2, -binomial_2)
+
+# check the sub-population data
+fish_intra %>%
+  filter(!is.na(mean_ucrit_subpopulation)) %>%
+  arrange(binomial) %>%
+  select(binomial, mean_ucrit, mean_ucrit_subpopulation, latitude_species, latitude_subpopulation) %>%
+  View()
+
+# something is strange here... why do you have a mean_ucrit and sub-population for same species?
+# all from same reference?
+
+# subset out binomials with all relevant data
+fish_intra <- 
+  fish_intra %>%
+  filter_at(vars(c("mean_ucrit_subpopulation", "latitude_subpopulation")),
+            all_vars(!is.na(.))) %>%
+  select(binomial,  mean_ucrit_subpopulation, latitude_subpopulation) %>%
+  mutate(latitude_subpopulation = abs(latitude_subpopulation))
+
+ggplot(data = fish_intra,
+       mapping = aes(x = latitude_subpopulation,
+                     y = mean_ucrit_subpopulation,
+                     colour = binomial)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic()
+
+# extract ordinary least squares slopes for each species
+intra_slopes <- 
+  fish_intra %>%
+  split(., fish_intra$binomial) %>%
+  lapply(., function(x) {
+    a <- lm(mean_ucrit_subpopulation ~ latitude_subpopulation, 
+            data = x)
+    a$coefficients[[2]]
+  }) %>%
+  unlist(., use.names = FALSE)
+
+# use a one-sample t-test to determine whether these are significantly greater than zero
+t.test(intra_slopes, alternative = c("two.sided"))
+
+# they are! even in sub-populations, the effect holds
+
+
+
+### test predictions using a random effects model
+
+fams <- 
+  ds_dat %>% 
+  group_by(family) %>%
+  summarise(n = n()) %>%
+  filter(n > 3) %>%
+  pull(family)
+
+ds_ran_dat <- 
+  ds_dat %>%
+  filter(family %in% fams)
+
+View(ds_ran_dat)
+
+# which variables are we interested in?
+var_list <- c("diet_dplus", "food_i", "hab_dplus", "env_special",
+              "latitude_species", "mean_ucrit", "dispersal_trait_axis")
+
+
+ds_ran_dat %>%
+  filter_at(vars(var_list), any_vars(is.na(.))) %>%
+  View()
+
+### prediction 1: there is a trade-off between dispersal ability and specialisation
+
+
+### diet_dplus and ucrit
+
+# subset out the data points with diet_dplus and mean_ucrit values and for families with more than 3 data points
+ds_ran_1 <- 
+  ds_ran_dat %>%
+  filter_at(vars(c("diet_dplus", "mean_ucrit")), all_vars(!is.na(.))) %>%
+  group_by(family) %>%
+  mutate(n = n()) %>%
+  filter(n > 3)
+
+# plot these data
+ggplot(data = ds_ran_1,
+       mapping = aes(x = diet_dplus, y = mean_ucrit, colour = family ) ) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic()
+
+
+# fit a random effects model to these data
+
+# fit a random slope and random intercept
+lm_1 <- 
+  lmer(mean_ucrit ~ diet_dplus + (0 + diet_dplus|family), REML = FALSE,
+     data = ds_ran_1)
+
+AIC(lm_1)
+
+# fit a random intercept only
+lm_1a <- 
+  lmer(mean_ucrit ~ diet_dplus + (1|family), REML = FALSE,
+       data = ds_ran_1)
+
+AIC(lm_1a)
+
+# model with the random intercept only fits the data better
+
+# check model assumptions
+plot(lm_1a)
+
+hist(residuals(lm_1a))
+
+# check model results
+r.squaredGLMM(lm_1a)
+
+
+### hab_dplus and ucrit
+
+# subset out the data points with diet_dplus and mean_ucrit values and for families with more than 3 data points
+ds_ran_2 <- 
+  ds_ran_dat %>%
+  filter_at(vars(c("hab_dplus", "mean_ucrit")), all_vars(!is.na(.))) %>%
+  group_by(family) %>%
+  mutate(n = n()) %>%
+  filter(n > 3)
+
+# plot these data
+ggplot(data = ds_ran_2,
+       mapping = aes(x = hab_dplus, y = mean_ucrit, colour = family ) ) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic()
+
+
+# fit a random effects model to these data
+
+# fit a random slope and random intercept
+lm_2 <- 
+  lmer(mean_ucrit ~ hab_dplus + (0 + hab_dplus|family), REML = FALSE,
+       data = ds_ran_2)
+
+AIC(lm_2)
+
+# fit a random intercept only
+lm_2a <- 
+  lmer(mean_ucrit ~ hab_dplus + (1|family), REML = FALSE,
+       data = ds_ran_2)
+
+AIC(lm_2a)
+
+# model with the random intercept only fits the data better
+
+# check model assumptions
+plot(lm_2a)
+
+hist(residuals(lm_2a))
+
+# check model results
+r.squaredGLMM(lm_2a)
+
+
+### prediction 2: dispersal should increase with latitude
+
+### latitude and ucrit
+
+# subset out the data points with diet_dplus and mean_ucrit values and for families with more than 3 data points
+ds_ran_3 <- 
+  ds_ran_dat %>%
+  mutate(latitude_species = abs(latitude_species)) %>%
+  filter_at(vars(c("latitude_species", "mean_ucrit")), all_vars(!is.na(.))) %>%
+  group_by(family) %>%
+  mutate(n = n()) %>%
+  filter(n > 3)
+
+# plot these data
+ggplot(data = ds_ran_3,
+       mapping = aes(x = latitude_species, y = mean_ucrit, colour = family ) ) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic()
+
+
+# fit a random effects model to these data
+
+# fit a random slope and random intercept
+lm_3 <- 
+  lmer(mean_ucrit ~ latitude_species + (0 + latitude_species|family), REML = FALSE,
+       data = ds_ran_3)
+
+AIC(lm_3)
+
+# fit a random intercept only
+lm_3a <- 
+  lmer(mean_ucrit ~ latitude_species + (1|family), REML = FALSE,
+       data = ds_ran_3)
+
+AIC(lm_3a)
+
+# model with the random intercept only fits the data better
+
+# check model assumptions
+plot(lm_3a)
+
+hist(residuals(lm_3a))
+
+# check model results
+r.squaredGLMM(lm_3a)
+
+# check the slopes and confidence intervals
+summary(lm_3a)
+confint(lm_3a)
+
+# does latitude have a significant effect?
+drop1(lm_3a, test = "Chisq")
+
+# yes it does
+
+
+### prediction 3: specialisation should decrease with latitude
+
+### latitude and specialisation
+
+# subset out the data points with diet_dplus and mean_ucrit values and for families with more than 3 data points
+ds_ran_4 <- 
+  ds_ran_dat %>%
+  mutate(latitude_species = abs(latitude_species)) %>%
+  filter_at(vars(c("latitude_species", "hab_dplus")), all_vars(!is.na(.))) %>%
+  group_by(family) %>%
+  mutate(n = n()) %>%
+  filter(n > 3)
+
+# plot these data
+ggplot(data = ds_ran_4,
+       mapping = aes(x = latitude_species, y = hab_dplus, colour = family ) ) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic()
+
+
+# fit a random effects model to these data
+
+# fit a random slope and random intercept
+lm_4 <- 
+  lmer(hab_dplus ~ latitude_species + (0 + latitude_species|family), REML = FALSE,
+       data = ds_ran_4)
+
+AIC(lm_4)
+
+# fit a random intercept only
+lm_4a <- 
+  lmer(hab_dplus ~ latitude_species + (1|family), REML = FALSE,
+       data = ds_ran_4)
+
+AIC(lm_4a)
+
+# model with the random intercept and random slope and intercept are equivalent (in AIC)
+# use more complex model 
+
+# check model assumptions
+plot(lm_4a)
+
+hist(residuals(lm_4a))
+
+# assumptions not really met
+# we would need more complex models here
+
+
+
+
+
 
 
 
